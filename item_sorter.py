@@ -9,6 +9,11 @@
       <подпапка 2>/<файлы для подпапки 2>_<артикул>.ext
       <подпапка 3>/<имя файла>_<артикул>_3D.ext
 
+Код модели перед артикулом (FO-R_, FO-DM_, FO-D_, FO-RM_ и т.п.) из имени
+убирается: "Паспорт FO-R.pdf" -> "Паспорт 02-0331.pdf",
+"FO-R.png" -> "02-0331_3D.png". Файлы, разложенные раньше со старыми именами,
+переименовываются при каждом проходе.
+
 Все папки артикулов создаются в отдельной папке "Номенклатура" рядом со
 скриптом (можно задать другую через --dest).
 
@@ -18,7 +23,7 @@ structure.csv и докопирует новые или изменившиеся
 
 import argparse
 import csv
-import os
+import re
 import shutil
 import sys
 import time
@@ -69,6 +74,12 @@ def read_structure(csv_path):
     return rows
 
 
+def strip_model_code(name, article):
+    """Убирает код модели (латиница/цифры/дефисы, напр. FO-R) прямо перед _<артикул>."""
+    pattern = r"(^|[ _])[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*_(?=" + re.escape(article) + ")"
+    return re.sub(pattern, r"\1", name)
+
+
 def build_targets(row):
     """Возвращает список (имя исходного файла, относительная папка, новое имя)."""
     article = row[ROOT_COL]
@@ -85,7 +96,7 @@ def build_targets(row):
             if not src_name:
                 continue
             p = Path(src_name)
-            new_name = f"{p.stem}_{article}{suffix}{p.suffix}"
+            new_name = strip_model_code(f"{p.stem}_{article}{suffix}{p.suffix}", article)
             targets.append((src_name, subfolder, new_name))
     return targets
 
@@ -114,6 +125,27 @@ def needs_copy(src, dst):
     return s.st_size != d.st_size or s.st_mtime > d.st_mtime + 1
 
 
+def clean_existing(root, article, dest):
+    """Переименовывает уже разложенные файлы, в именах которых остался код модели."""
+    renamed = 0
+    if not root.is_dir():
+        return renamed
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        clean = strip_model_code(path.name, article)
+        if clean == path.name:
+            continue
+        target = path.with_name(clean)
+        if target.exists():
+            path.unlink()  # чистая версия уже есть - старая копия не нужна
+        else:
+            path.rename(target)
+        renamed += 1
+        log(f"Переименован: {path.relative_to(dest)} -> {clean}")
+    return renamed
+
+
 def process(csv_path, files_dir, dest, reported_missing):
     rows = read_structure(csv_path)
     by_name, by_stem = index_sources(files_dir)
@@ -123,6 +155,7 @@ def process(csv_path, files_dir, dest, reported_missing):
     for row in rows:
         article = row[ROOT_COL]
         root = dest / article
+        clean_existing(root, article, dest)
         for src_name, subfolder, new_name in build_targets(row):
             src = find_source(src_name, by_name, by_stem)
             if src is None:
