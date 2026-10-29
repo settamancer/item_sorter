@@ -9,10 +9,8 @@
       <подпапка 2>/<файлы для подпапки 2>_<артикул>.ext
       <подпапка 3>/<имя файла>_<артикул>_3D.ext
 
-Папка артикула ищется в целевом каталоге (на 1-2 уровня вглубь, например
-"2 LAN-кабель стандартные упаковки/02-0331"). Если её нет, она создаётся
-в папке категории, номер которой совпадает с префиксом артикула
-("02-0331" -> "2 ..."), а если такой категории нет - прямо в целевом каталоге.
+Все папки артикулов создаются в отдельной папке "Номенклатура" рядом со
+скриптом (можно задать другую через --dest).
 
 Скрипт работает постоянно: каждые N секунд пересканирует папку files и
 structure.csv и докопирует новые или изменившиеся файлы. Остановка - Ctrl+C.
@@ -109,49 +107,6 @@ def find_source(name, by_name, by_stem):
     return by_name.get(key) or by_stem.get(key) or by_stem.get(normalize(Path(name).stem))
 
 
-def category_number(name):
-    head = name.split(" ", 1)[0].split("-", 1)[0]
-    return int(head) if head.isdigit() else None
-
-
-class FolderLocator:
-    """Ищет/выбирает папку артикула в целевом каталоге."""
-
-    def __init__(self, dest, skip):
-        self.dest = dest
-        self.skip = {s.resolve() for s in skip}
-        self.refresh()
-
-    def refresh(self):
-        self.existing = {}
-        self.categories = {}
-        for d in self._subdirs(self.dest):
-            self.existing.setdefault(d.name, d)
-            num = category_number(d.name)
-            if num is not None and " " in d.name:
-                self.categories.setdefault(num, d)
-            for sub in self._subdirs(d):
-                self.existing.setdefault(sub.name, sub)
-
-    def _subdirs(self, path):
-        try:
-            return sorted(
-                p for p in path.iterdir()
-                if p.is_dir() and not p.name.startswith(".") and p.resolve() not in self.skip
-            )
-        except OSError:
-            return []
-
-    def locate(self, article):
-        if article in self.existing:
-            return self.existing[article]
-        num = category_number(article)
-        parent = self.categories.get(num, self.dest)
-        folder = parent / article
-        self.existing[article] = folder
-        return folder
-
-
 def needs_copy(src, dst):
     if not dst.exists():
         return True
@@ -162,13 +117,12 @@ def needs_copy(src, dst):
 def process(csv_path, files_dir, dest, reported_missing):
     rows = read_structure(csv_path)
     by_name, by_stem = index_sources(files_dir)
-    locator = FolderLocator(dest, skip=[files_dir])
     now = time.time()
     copied = 0
 
     for row in rows:
         article = row[ROOT_COL]
-        root = locator.locate(article)
+        root = dest / article
         for src_name, subfolder, new_name in build_targets(row):
             src = find_source(src_name, by_name, by_stem)
             if src is None:
@@ -201,13 +155,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--files", type=Path, default=base / "files", help="папка с исходными файлами (по умолчанию ./files)")
     ap.add_argument("--csv", type=Path, default=base / "structure.csv", help="файл связей (по умолчанию ./structure.csv)")
-    ap.add_argument("--dest", type=Path, default=base, help="куда раскладывать (по умолчанию текущая папка)")
+    ap.add_argument("--dest", type=Path, default=base / "Номенклатура", help="куда раскладывать (по умолчанию ./Номенклатура)")
     ap.add_argument("--interval", type=float, default=5.0, help="пауза между сканированиями, сек (по умолчанию 5)")
     ap.add_argument("--once", action="store_true", help="выполнить один проход и выйти")
     args = ap.parse_args()
 
     files_dir, csv_path, dest = args.files.resolve(), args.csv.resolve(), args.dest.resolve()
     files_dir.mkdir(parents=True, exist_ok=True)
+    dest.mkdir(parents=True, exist_ok=True)
     log(f"Исходные файлы: {files_dir}")
     log(f"Структура:      {csv_path}")
     log(f"Назначение:     {dest}")
