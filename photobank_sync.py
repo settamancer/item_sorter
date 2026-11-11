@@ -76,6 +76,13 @@ TEMPLATE = [
     f"{SERVICE}/Упаковка",
     "Фото товара",
 ]
+# Эти папки не создаются пустыми - только если в них есть что положить.
+OPTIONAL_DIRS = {f"{SERVICE}/Исходники", f"{SERVICE}/Старые фото"}
+
+# Документы для папки "Сертификаты": декларации, сертификаты (в т.ч. пожарные),
+# отказные письма, уведомления об отказе, отрицательные решения, выписки из
+# реестра российской продукции (ТОРП), свидетельства.
+CERT_KEYWORDS = ("сертификат", "декларац", "отказ", "отрицательн", "выписк", "реестр", "свидетельств")
 
 JUNK_DIRS = {"._dav", "@eadir", "#recycle", "#snapshot", ".spotlight-v100", ".trashes", ".fseventsd"}
 JUNK_FILES = {"thumbs.db", ".ds_store", "desktop.ini", "ehthumbs.db"}
@@ -106,7 +113,7 @@ RULES = [
     (lambda n, e, a: e in PHOTO_EXT and is_product_photo(n, a), "Фото товара"),
     (lambda n, e, a: n.startswith("паспорт") and e == ".pdf", ""),
     (lambda n, e, a: n.startswith("паспорт"), SERVICE),
-    (lambda n, e, a: any(k in n for k in ("сертификат", "декларац", "отказн", "свидетельств")), "Сертификаты"),
+    (lambda n, e, a: any(k in n for k in CERT_KEYWORDS), "Сертификаты"),
     (lambda n, e, a: "протокол" in n, f"{SERVICE}/Протокол испытаний"),
     (lambda n, e, a: "описани" in n, "Описание"),
     (lambda n, e, a: any(k in n for k in ("этикет", "упаков", "коробк")), f"{SERVICE}/Упаковка"),
@@ -160,8 +167,9 @@ def list_dir(path):
     return sorted(dirs), sorted(files)
 
 
-def walk_files(root):
-    """Все файлы внутри root (относительные пути как кортежи частей), без мусора."""
+def walk_files(root, dirs_out=None):
+    """Все файлы внутри root (относительные пути как кортежи частей), без мусора.
+    Если передан dirs_out, в него добавляются пути всех найденных папок."""
     stack = [()]
     while stack:
         rel = stack.pop()
@@ -170,6 +178,8 @@ def walk_files(root):
             yield rel + (f,)
         for d in reversed(dirs):
             stack.append(rel + (d,))
+            if dirs_out is not None:
+                dirs_out.append(rel + (d,))
 
 
 def classify(rel_parts, article):
@@ -233,11 +243,21 @@ def unique_target(rel, used):
 
 def sync_item(src_item, dst_item, article, stats, dry_run):
     for t in TEMPLATE:
-        if not dry_run:
+        if t not in OPTIONAL_DIRS and not dry_run:
             os.makedirs(long_path(dst_item / t), exist_ok=True)
 
+    # Необязательные папки создаём, если такая папка есть в источнике (даже
+    # пустая); если в неё попадут файлы, она создастся при копировании.
+    src_dirs = []
+    files = list(walk_files(src_item, src_dirs))
+    optional = {norm(o): o for o in OPTIONAL_DIRS}
+    for d in src_dirs:
+        target = optional.get(norm(classify(d + ("_",), article).parent.as_posix()))
+        if target and norm(d[-1]) == norm(Path(target).name) and not dry_run:
+            os.makedirs(long_path(dst_item / target), exist_ok=True)
+
     used = set()
-    for rel_parts in walk_files(src_item):
+    for rel_parts in files:
         src = Path(src_item, *rel_parts)
         rel = unique_target(classify(rel_parts, article), used)
         dst = dst_item / rel
