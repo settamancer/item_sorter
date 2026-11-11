@@ -249,37 +249,9 @@ def add_article(rel, article):
 # --- Латиница в "Фото товара" и "Сертификаты" ---------------------------------
 
 # В этих папках имена файлов и подпапок должны быть только латиницей.
-LATIN_ONLY_DIRS = ("Фото товара", "Сертификаты")
+LATIN_ONLY_DIRS = ("Фото товара", "Сертификаты", "Описание")
 
-# Перевод типовых фраз (без учёта регистра, длинные фразы раньше коротких).
-# Всё, чего нет в словаре, транслитерируется. Словарь можно пополнять.
-PHRASES = {
-    "пожарный сертификат соответствия": "Fire Certificate of Conformity",
-    "сертификат соответствия": "Certificate of Conformity",
-    "декларация о соответствии": "Declaration of Conformity",
-    "выписка из реестра российской продукции": "Extract from the Register of Russian Products",
-    "отказное письмо": "Letter of Refusal",
-    "уведомление об отказе": "Notice of Refusal",
-    "отрицательное решение": "Negative Decision",
-    "протокол испытаний": "Test Report",
-    "монтажная коробка": "Mounting Box",
-    "пожарный сертификат": "Fire Certificate",
-    "сертификат": "Certificate",
-    "отказ": "Refusal",
-    "декларация": "Declaration",
-    "пожарный": "fire",
-    "шкафы": "Cabinets",
-    "инструменты": "Tools",
-    "розетки": "sockets",
-    "патч-корды": "patch cords",
-    "патч-модули": "patch modules",
-    "бандлы": "bundles",
-    "еаэс": "EAEU",
-    "eaэс": "EAEU",  # латинские EA + кириллица
-    "исх.": "Ref.",
-    "от": "dated",
-}
-SYMBOLS = {"№": "No.", "«": "", "»": "", "–": "-", "—": "-"}
+SYMBOLS = {"№": "N", "«": "", "»": "", "–": "-", "—": "-"}
 
 TRANSLIT = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя", [
     "a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p",
@@ -289,9 +261,6 @@ HOMOGLYPHS = dict(zip("АВЕКМНОРСТУХаеорсухк", "ABEKMHOPCTYXa
 
 CYR_RE = re.compile(r"[а-яё]", re.IGNORECASE)
 LETTERS_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+")
-PHRASE_RE = re.compile(
-    r"(?<![а-яёa-z])(" + "|".join(re.escape(p) for p in sorted(PHRASES, key=len, reverse=True)) + r")(?![а-яёa-z])",
-    re.IGNORECASE)
 
 
 def _translit(run):
@@ -307,8 +276,7 @@ def _translit(run):
 
 
 def to_latin(text):
-    """Переводит/транслитерирует имя в латиницу.
-    - типовые фразы переводятся по словарю PHRASES;
+    """Транслитерирует имя в латиницу (без перевода слов).
     - одиночная кириллическая буква рядом с цифрами (05-0900_Т1, Д-RU.РА02.В.123) и
       кириллица внутри латинского слова заменяются похожей латинской буквой;
     - остальные русские слова транслитерируются (ОКВ-Р -> OKV-R, СККБ -> SKKB)."""
@@ -316,7 +284,6 @@ def to_latin(text):
         return text
     for s, r in SYMBOLS.items():
         text = text.replace(s, r)
-    text = PHRASE_RE.sub(lambda m: PHRASES[m.group(1).lower()], text)
 
     def repl(m):
         run = m.group(0)
@@ -341,7 +308,7 @@ def in_latin_dir(rel):
 
 def final_name(rel, article):
     """Итоговый путь файла: дописывает _<артикул> (add_article) и, в LATIN_ONLY_DIRS,
-    переводит в латиницу имя файла, подпапки и сам артикул. Перевод делается до
+    транслитерирует имя файла, подпапки и сам артикул. Транслитерация делается до
     дописывания артикула, чтобы цифры артикула не влияли на разбор имени."""
     with_article = add_article(rel, article)
     if not in_latin_dir(rel):
