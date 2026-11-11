@@ -82,12 +82,25 @@ RAW_EXT = {".cr2", ".cr3", ".nef", ".arw", ".orf", ".raf", ".rw2", ".dng",
            ".psd", ".psb", ".tif", ".tiff", ".ai", ".eps", ".indd"}
 MODEL_EXT = {".stl", ".step", ".stp", ".obj", ".fbx", ".3ds", ".max", ".blend"}
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+PHOTO_EXT = IMAGE_EXT | {".tif", ".tiff"}
+
+# Папка "Старые фото" прямо в папке номенклатуры копируется как есть:
+# те же подпапки и имена файлов, без раскладки по правилам.
+KEEP_AS_IS_DIRS = {"старые фото"}
+
+
+def is_product_photo(name, article):
+    """<артикул>_T1, _Y2, _3D, _G4 ... (имя и артикул уже в нижнем регистре)."""
+    return re.fullmatch(re.escape(article) + r"_(?:[a-zа-яё]+\d*|3d\d*)\.[^.]+", name) is not None
 DOC_EXT = {".doc", ".docx", ".rtf", ".odt", ".txt"}
 
 # Правила для файлов, лежащих не в стандартной папке. Проверяются по порядку,
 # первое совпавшее определяет папку ("" - корень папки номенклатуры).
 # Аргументы: имя файла в нижнем регистре, расширение, артикул в нижнем регистре.
 RULES = [
+    # Готовые фото товара, названные по артикулу: 05-0900_T1, _T6, _Y1, _Y2, _3D ...
+    # Стоит первым, чтобы, например, 05-0900_3D.tif не ушёл в "Исходники".
+    (lambda n, e, a: e in PHOTO_EXT and is_product_photo(n, a), "Фото товара"),
     (lambda n, e, a: n.startswith("паспорт") and e == ".pdf", ""),
     (lambda n, e, a: n.startswith("паспорт"), SERVICE),
     (lambda n, e, a: any(k in n for k in ("сертификат", "декларац", "отказн", "свидетельств")), "Сертификаты"),
@@ -97,8 +110,6 @@ RULES = [
     (lambda n, e, a: "сплеш" in n or "splash" in n, SERVICE),
     (lambda n, e, a: e in RAW_EXT, f"{SERVICE}/Исходники"),
     (lambda n, e, a: e in MODEL_EXT, f"{SERVICE}/Старые фото"),
-    # Фото, названные по артикулу (05-0900_T1.png, 05-0900_Y1.png) - готовые фото товара.
-    (lambda n, e, a: e in IMAGE_EXT and re.match(re.escape(a) + r"_[a-zа-я]+\d*\.", n), "Фото товара"),
     (lambda n, e, a: e in IMAGE_EXT, f"{SERVICE}/Старые фото"),
 ]
 
@@ -165,6 +176,9 @@ def classify(rel_parts, article):
     name = rel_parts[-1]
     folders = rel_parts[:-1]
     nfolders = tuple(norm(f) for f in folders)
+
+    if nfolders and nfolders[0] in KEEP_AS_IS_DIRS:
+        return Path(*rel_parts)
 
     # Файл уже лежит в стандартной папке - берём самый длинный совпавший префикс.
     for k in range(len(nfolders), 0, -1):
