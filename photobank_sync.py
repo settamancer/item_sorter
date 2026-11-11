@@ -17,6 +17,9 @@
 Источник: <src>/<категория>/<артикул>/... (по умолчанию
 \\\\192.168.13.200\\дм\\ОПМ\\БАЗА ПО ПРОДУКТАМ - ФОТОБАНК).
 
+Копируются только папки категорий из CATEGORIES (1-10); остальное
+содержимое корня фотобанка пропускается.
+
 Все папки структуры создаются всегда; если каких-то файлов нет, остаются
 пустые папки. Файлы, уже лежащие в папках с правильными именами, сохраняют
 своё место; файлы из корня или из нестандартных папок раскладываются по
@@ -39,6 +42,25 @@ from pathlib import Path
 
 DEFAULT_SRC = r"\\192.168.13.200\дм\ОПМ\БАЗА ПО ПРОДУКТАМ - ФОТОБАНК"
 DEFAULT_DEST = "Фотобанк"
+
+# Какие папки фотобанка копировать: только категории номенклатуры. Папка
+# берётся, если её имя начинается с номера из списка и пробела ("1 LAN CCA ...",
+# "10 Телекоммуникационные ..."); всё остальное в корне фотобанка пропускается.
+# Сопоставление по номеру, а не по полному имени, чтобы мелкие правки названий
+# категорий на NAS не ломали копирование.
+CATEGORIES = {
+    1: "LAN CCA кабель стандартные упаковки",
+    2: "LAN-кабель стандартные упаковки",
+    3: "Арматура и монтажные материалы",
+    4: "Инструменты",
+    5: "Коаксиальный кабель в стандартной упаковке",
+    6: "Коннекторы, разъемы, переходники",
+    7: "Медные компоненты",
+    8: "Оптические кабели стандартные упаковки",
+    9: "Оптические компоненты",
+    10: "Телекоммуникационные шкафы, стойки",
+}
+CATEGORY_RE = re.compile(r"^\s*(\d+)\s+\S")
 
 SERVICE = "Служебные материалы"
 # Структура папки номенклатуры (по folder_example.zip).
@@ -158,6 +180,11 @@ def classify(rel_parts, article):
     return Path(SERVICE, *folders, name)
 
 
+def is_category(name):
+    m = CATEGORY_RE.match(name)
+    return bool(m) and int(m.group(1)) in CATEGORIES
+
+
 def needs_copy(src, dst):
     try:
         d = os.stat(long_path(dst))
@@ -231,7 +258,14 @@ def main():
 
     only = [norm(o) for o in args.only] if args.only else None
     stats = {"items": 0, "copied": 0, "same": 0, "errors": 0}
-    categories, _ = list_dir(src_root)
+    all_dirs, _ = list_dir(src_root)
+    categories = sorted((d for d in all_dirs if is_category(d)),
+                        key=lambda d: int(CATEGORY_RE.match(d).group(1)))
+    skipped = [d for d in all_dirs if d not in categories]
+    log(f"Категорий к копированию: {len(categories)}, прочих папок пропущено: {len(skipped)}")
+    found = {int(CATEGORY_RE.match(d).group(1)) for d in categories}
+    for num in sorted(set(CATEGORIES) - found):
+        log(f"  ВНИМАНИЕ: не найдена категория {num} {CATEGORIES[num]}")
     for cat in categories:
         try:
             items, loose = list_dir(src_root / cat)
