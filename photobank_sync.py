@@ -101,7 +101,9 @@ OLD_PHOTOS_DIR = "старые фото"
 
 def is_product_photo(name, article):
     """<артикул>_T1, _Y2, _3D, _G4 ... (имя и артикул уже в нижнем регистре)."""
-    return re.fullmatch(re.escape(article) + r"_(?:[a-zа-яё]+\d*|3d\d*)\.[^.]+", name) is not None
+    return re.fullmatch(re.escape(article) + r"_(?:[a-zа-яё]+\d*|3[dд]\d*)\.[^.]+", name) is not None
+
+
 DOC_EXT = {".doc", ".docx", ".rtf", ".odt", ".txt"}
 
 # Правила для файлов, лежащих не в стандартной папке. Проверяются по порядку,
@@ -243,6 +245,113 @@ def add_article(rel, article):
     return rel.with_name(f"{stem}_{article}{suffix}")
 
 
+# --- Латиница в "Фото товара" и "Сертификаты" ---------------------------------
+
+# В этих папках имена файлов и подпапок должны быть только латиницей.
+LATIN_ONLY_DIRS = ("Фото товара", "Сертификаты")
+
+# Перевод типовых фраз (без учёта регистра, длинные фразы раньше коротких).
+# Всё, чего нет в словаре, транслитерируется. Словарь можно пополнять.
+PHRASES = {
+    "пожарный сертификат соответствия": "Fire Certificate of Conformity",
+    "сертификат соответствия": "Certificate of Conformity",
+    "декларация о соответствии": "Declaration of Conformity",
+    "выписка из реестра российской продукции": "Extract from the Register of Russian Products",
+    "отказное письмо": "Letter of Refusal",
+    "уведомление об отказе": "Notice of Refusal",
+    "отрицательное решение": "Negative Decision",
+    "протокол испытаний": "Test Report",
+    "монтажная коробка": "Mounting Box",
+    "пожарный сертификат": "Fire Certificate",
+    "сертификат": "Certificate",
+    "отказ": "Refusal",
+    "декларация": "Declaration",
+    "пожарный": "fire",
+    "шкафы": "Cabinets",
+    "инструменты": "Tools",
+    "розетки": "sockets",
+    "патч-корды": "patch cords",
+    "патч-модули": "patch modules",
+    "бандлы": "bundles",
+    "еаэс": "EAEU",
+    "eaэс": "EAEU",  # латинские EA + кириллица
+    "исх.": "Ref.",
+    "от": "dated",
+}
+SYMBOLS = {"№": "No.", "«": "", "»": "", "–": "-", "—": "-"}
+
+TRANSLIT = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя", [
+    "a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p",
+    "r", "s", "t", "u", "f", "kh", "ts", "ch", "sh", "shch", "", "y", "", "e", "yu", "ya"]))
+# Кириллические буквы, неотличимые от латинских (Т в 05-0900_Т1, У в _У1, В в .В.123).
+HOMOGLYPHS = dict(zip("АВЕКМНОРСТУХаеорсухк", "ABEKMHOPCTYXaeopcyxk"))
+
+CYR_RE = re.compile(r"[а-яё]", re.IGNORECASE)
+LETTERS_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+")
+PHRASE_RE = re.compile(
+    r"(?<![а-яёa-z])(" + "|".join(re.escape(p) for p in sorted(PHRASES, key=len, reverse=True)) + r")(?![а-яёa-z])",
+    re.IGNORECASE)
+
+
+def _translit(run):
+    """Транслитерация с сохранением регистра: ОКЛм -> OKLm, Жуков -> Zhukov, ЖК -> ZHK."""
+    many_upper = sum(c.isupper() for c in run) > 1
+    out = []
+    for c in run:
+        t = TRANSLIT.get(c.lower(), c)
+        if c.isupper():
+            t = t.upper() if many_upper else t.capitalize()
+        out.append(t)
+    return "".join(out)
+
+
+def to_latin(text):
+    """Переводит/транслитерирует имя в латиницу.
+    - типовые фразы переводятся по словарю PHRASES;
+    - одиночная кириллическая буква рядом с цифрами (05-0900_Т1, Д-RU.РА02.В.123) и
+      кириллица внутри латинского слова заменяются похожей латинской буквой;
+    - остальные русские слова транслитерируются (ОКВ-Р -> OKV-R, СККБ -> SKKB)."""
+    if not CYR_RE.search(text) and not any(s in text for s in SYMBOLS):
+        return text
+    for s, r in SYMBOLS.items():
+        text = text.replace(s, r)
+    text = PHRASE_RE.sub(lambda m: PHRASES[m.group(1).lower()], text)
+
+    def repl(m):
+        run = m.group(0)
+        if not CYR_RE.search(run):
+            return run
+        start, end = m.span()
+        chunk_l = text.rfind(" ", 0, start) + 1
+        chunk_r = text.find(" ", end)
+        chunk = text[chunk_l:chunk_r if chunk_r != -1 else len(text)]
+        mixed = re.search(r"[A-Za-z]", run) is not None
+        code_letter = len(run) == 1 and re.search(r"\d", chunk) is not None
+        if mixed or code_letter:
+            return "".join(HOMOGLYPHS.get(c) or _translit(c) if CYR_RE.match(c) else c for c in run)
+        return _translit(run)
+
+    return LETTERS_RE.sub(repl, text)
+
+
+def in_latin_dir(rel):
+    return len(rel.parts) > 1 and norm(rel.parts[0]) in {norm(d) for d in LATIN_ONLY_DIRS}
+
+
+def final_name(rel, article):
+    """Итоговый путь файла: дописывает _<артикул> (add_article) и, в LATIN_ONLY_DIRS,
+    переводит в латиницу имя файла, подпапки и сам артикул. Перевод делается до
+    дописывания артикула, чтобы цифры артикула не влияли на разбор имени."""
+    with_article = add_article(rel, article)
+    if not in_latin_dir(rel):
+        return with_article
+    lat = Path(rel.parts[0], *(to_latin(p) for p in rel.parts[1:]))
+    if with_article == rel:
+        return lat
+    stem, suffix = (lat.stem, lat.suffix) if lat.suffix else (lat.name, "")
+    return lat.with_name(f"{stem}_{to_latin(article)}{suffix}")
+
+
 def is_category(name):
     m = CATEGORY_RE.match(name)
     return bool(m) and int(m.group(1)) in CATEGORIES
@@ -291,7 +400,9 @@ def sync_item(src_item, dst_item, article, stats, dry_run):
     used = set()
     for rel_parts in files:
         src = Path(src_item, *rel_parts)
-        rel = unique_target(add_article(classify(rel_parts, article), article), used)
+        rel = unique_target(final_name(classify(rel_parts, article), article), used)
+        if in_latin_dir(rel) and CYR_RE.search("/".join(rel.parts[1:])):
+            log(f"  ВНИМАНИЕ: в имени осталась кириллица: {article}/{rel.as_posix()}")
         dst = dst_item / rel
         moved = Path(*rel_parts) != rel
         try:
