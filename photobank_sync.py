@@ -107,6 +107,16 @@ DOC_EXT = {".doc", ".docx", ".rtf", ".odt", ".txt"}
 # Правила для файлов, лежащих не в стандартной папке. Проверяются по порядку,
 # первое совпавшее определяет папку ("" - корень папки номенклатуры).
 # Аргументы: имя файла в нижнем регистре, расширение, артикул в нижнем регистре.
+# В этих папках имена файлов не меняются (артикул не дописывается).
+NO_RENAME_DIRS = (f"{SERVICE}/Исходники", f"{SERVICE}/Старые фото")
+
+DATASHEET_RE = re.compile(r"data[\s_.-]*sheet|даташит", re.IGNORECASE)
+
+
+def is_datasheet(name):
+    return DATASHEET_RE.search(name) is not None
+
+
 RULES = [
     # Готовые фото товара, названные по артикулу: 05-0900_T1, _T6, _Y1, _Y2, _3D ...
     # Стоит первым, чтобы, например, 05-0900_3D.tif не ушёл в "Исходники".
@@ -194,6 +204,10 @@ def classify(rel_parts, article):
         k = nfolders.index(OLD_PHOTOS_DIR)
         return Path(OLD_PHOTOS_TARGET, *folders[k + 1:], name)
 
+    # Datasheet - всегда в корень "Служебных материалов", где бы ни лежал.
+    if is_datasheet(name):
+        return Path(SERVICE, name)
+
     # Файл уже лежит в стандартной папке - берём самый длинный совпавший префикс.
     for k in range(len(nfolders), 0, -1):
         canon = CANON.get(nfolders[:k])
@@ -209,6 +223,24 @@ def classify(rel_parts, article):
     if not folders:
         return Path(name)
     return Path(SERVICE, *folders, name)
+
+
+def article_pattern(article):
+    """Артикул как отдельное слово: до и после - не буква, не цифра и не дефис
+    ("_" и пробел допускаются), чтобы 01-0104 не совпал внутри 01-0104-1."""
+    return re.compile(r"(?<![0-9a-zа-яё-])" + re.escape(norm(article)) + r"(?![0-9a-zа-яё-])")
+
+
+def add_article(rel, article):
+    """Добавляет _<артикул> в конец имени файла, если артикула в имени нет.
+    Файлы в "Исходниках" и "Старых фото" не переименовываются."""
+    parent = norm(rel.parent.as_posix())
+    if any(parent == norm(d) or parent.startswith(norm(d) + "/") for d in NO_RENAME_DIRS):
+        return rel
+    if article_pattern(article).search(norm(rel.name)):
+        return rel
+    stem, suffix = (rel.stem, rel.suffix) if rel.suffix else (rel.name, "")
+    return rel.with_name(f"{stem}_{article}{suffix}")
 
 
 def is_category(name):
@@ -259,7 +291,7 @@ def sync_item(src_item, dst_item, article, stats, dry_run):
     used = set()
     for rel_parts in files:
         src = Path(src_item, *rel_parts)
-        rel = unique_target(classify(rel_parts, article), used)
+        rel = unique_target(add_article(classify(rel_parts, article), article), used)
         dst = dst_item / rel
         moved = Path(*rel_parts) != rel
         try:
