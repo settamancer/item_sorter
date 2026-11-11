@@ -23,8 +23,10 @@
 Все папки структуры создаются всегда; если каких-то файлов нет, остаются
 пустые папки. Файлы, уже лежащие в папках с правильными именами, сохраняют
 своё место; файлы из корня или из нестандартных папок раскладываются по
-правилам RULES ниже, а нераспознанные попадают в "Служебные материалы"
-с сохранением исходного пути. Служебный мусор Synology/Windows/macOS
+правилам RULES ниже. Нераспознанные файлы из корня номенклатуры остаются
+в корне, из нестандартных папок - попадают в "Служебные материалы" с
+сохранением исходного пути. Любая папка "Старые фото" переносится целиком
+в "Служебные материалы/Старые фото" без изменения содержимого. Служебный мусор Synology/Windows/macOS
 (._DAV, @eaDir, Thumbs.db, .DS_Store ...) не копируется.
 
 Повторный запуск докопирует только новые и изменённые файлы. Исходные
@@ -80,13 +82,14 @@ JUNK_FILES = {"thumbs.db", ".ds_store", "desktop.ini", "ehthumbs.db"}
 
 RAW_EXT = {".cr2", ".cr3", ".nef", ".arw", ".orf", ".raf", ".rw2", ".dng",
            ".psd", ".psb", ".tif", ".tiff", ".ai", ".eps", ".indd"}
-MODEL_EXT = {".stl", ".step", ".stp", ".obj", ".fbx", ".3ds", ".max", ".blend"}
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 PHOTO_EXT = IMAGE_EXT | {".tif", ".tiff"}
 
-# Папка "Старые фото" прямо в папке номенклатуры копируется как есть:
-# те же подпапки и имена файлов, без раскладки по правилам.
-KEEP_AS_IS_DIRS = {"старые фото"}
+# Папка "Старые фото", где бы она ни лежала в папке номенклатуры, переносится
+# в OLD_PHOTOS_TARGET целиком: те же подпапки и имена файлов, без раскладки
+# по правилам.
+OLD_PHOTOS_TARGET = f"{SERVICE}/Старые фото"
+OLD_PHOTOS_DIR = "старые фото"
 
 
 def is_product_photo(name, article):
@@ -109,8 +112,6 @@ RULES = [
     (lambda n, e, a: any(k in n for k in ("этикет", "упаков", "коробк")), f"{SERVICE}/Упаковка"),
     (lambda n, e, a: "сплеш" in n or "splash" in n, SERVICE),
     (lambda n, e, a: e in RAW_EXT, f"{SERVICE}/Исходники"),
-    (lambda n, e, a: e in MODEL_EXT, f"{SERVICE}/Старые фото"),
-    (lambda n, e, a: e in IMAGE_EXT, f"{SERVICE}/Старые фото"),
 ]
 
 
@@ -177,8 +178,11 @@ def classify(rel_parts, article):
     folders = rel_parts[:-1]
     nfolders = tuple(norm(f) for f in folders)
 
-    if nfolders and nfolders[0] in KEEP_AS_IS_DIRS:
-        return Path(*rel_parts)
+    # "Старые фото" (на любом уровне) - целиком в утверждённое место,
+    # содержимое и вложенные папки не трогаем.
+    if OLD_PHOTOS_DIR in nfolders:
+        k = nfolders.index(OLD_PHOTOS_DIR)
+        return Path(OLD_PHOTOS_TARGET, *folders[k + 1:], name)
 
     # Файл уже лежит в стандартной папке - берём самый длинный совпавший префикс.
     for k in range(len(nfolders), 0, -1):
@@ -190,7 +194,10 @@ def classify(rel_parts, article):
     for rule, target in RULES:
         if rule(n, e, a):
             return Path(target, name) if target else Path(name)
-    # Не распознали - в служебные материалы, сохраняя исходные подпапки.
+    # Не распознали: из корня номенклатуры - оставляем в корне как есть,
+    # из нестандартной папки - в служебные материалы, сохраняя исходные подпапки.
+    if not folders:
+        return Path(name)
     return Path(SERVICE, *folders, name)
 
 
