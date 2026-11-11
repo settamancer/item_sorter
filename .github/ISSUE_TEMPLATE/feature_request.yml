@@ -1,0 +1,36 @@
+name: "✨ Доработка"
+description: Новая функция или изменение существующей
+title: "[Доработка] "
+labels: ["enhancement", "статус: новая"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Раздел / функция
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: Что нужно сделать
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Зачем (проблема, которую решаем)
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Критерии приёмки
+      description: По этим пунктам тестировщик будет проверять результат
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Приоритет
+      options: ["Высокий", "Средний", "Низкий"]

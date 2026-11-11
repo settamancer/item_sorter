@@ -1,0 +1,51 @@
+name: "🐞 Баг"
+description: Ошибка, найденная при тестировании
+title: "[Баг] "
+labels: ["bug", "статус: новая"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Где (страница / функция)
+      placeholder: "https://site.ru/catalog или «Фильтр по цене»"
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Критичность
+      options:
+        - Блокер — функция не работает совсем
+        - Высокая — работает неправильно, обхода нет
+        - Средняя — есть обходной путь
+        - Низкая — косметика / текст
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги воспроизведения
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемый результат
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Фактический результат
+      description: Скриншоты и видео можно перетащить прямо сюда
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Окружение
+      placeholder: "Chrome 130, Windows 11 / iPhone 15, Safari; прод или тест"
