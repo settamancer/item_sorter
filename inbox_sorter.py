@@ -98,6 +98,10 @@ INFO_TEXT = [
     "  Расширения - через «;», пусто = любые. Папка - пусто или (корень) = корень папки номенклатуры.",
     "  Файлы, уже лежащие в стандартной подпапке (Входящие\\05-0900\\Сертификаты\\...), остаются в ней.",
     "  Любая папка «Старые фото» переносится целиком в «Служебные материалы/Старые фото».",
+    "",
+    "Префикс (лист «Папки») дописывается в начало имени каждого файла этой папки, если имя",
+    "  ещё не начинается с него. Пусто = без префикса. {артикул} подставляет артикул: {артикул}_",
+    "  В папках с транслитерацией префикс тоже транслитерируется.",
 ]
 
 SETTINGS_ROWS = [
@@ -113,17 +117,17 @@ SETTINGS_ROWS = [
     ("Проверять полноту", "да", "Лист «Полнота» в отчёте: у каких артикулов нет паспорта, фото T1, сертификатов"),
 ]
 
-FOLDER_ROWS = [  # папка, создавать всегда, транслитерация, дописывать артикул
-    (ROOT_LABEL, "да", "нет", "да"),
-    ("Описание", "да", "да", "да"),
-    ("Сертификаты", "да", "да", "да"),
-    (SERVICE, "да", "нет", "да"),
-    (f"{SERVICE}/Исходники", "нет", "нет", "нет"),
-    (f"{SERVICE}/Протокол испытаний", "да", "нет", "да"),
-    (f"{SERVICE}/Старые фото", "нет", "нет", "нет"),
-    (f"{SERVICE}/Упаковка", "да", "нет", "да"),
-    (f"{SERVICE}/Архив", "нет", "нет", "нет"),
-    ("Фото товара", "да", "да", "да"),
+FOLDER_ROWS = [  # папка, создавать всегда, транслитерация, дописывать артикул, префикс
+    (ROOT_LABEL, "да", "нет", "да", ""),
+    ("Описание", "да", "да", "да", ""),
+    ("Сертификаты", "да", "да", "да", ""),
+    (SERVICE, "да", "нет", "да", ""),
+    (f"{SERVICE}/Исходники", "нет", "нет", "нет", ""),
+    (f"{SERVICE}/Протокол испытаний", "да", "нет", "да", ""),
+    (f"{SERVICE}/Старые фото", "нет", "нет", "нет", ""),
+    (f"{SERVICE}/Упаковка", "да", "нет", "да", ""),
+    (f"{SERVICE}/Архив", "нет", "нет", "нет", ""),
+    ("Фото товара", "да", "да", "да", ""),
 ]
 
 IMG = "png; jpg; jpeg; webp; gif; bmp; tif; tiff"
@@ -196,8 +200,8 @@ def create_book(path, structure_csv):
     sheet(S_CATS, ["№", "Папка категории"],
           [(n, f"{n} {name}") for n, name in ps.CATEGORIES.items()], [6, 60])
     sheet(S_NEW, ["Артикул", "№ категории", "Комментарий"], [], [18, 14, 60])
-    sheet(S_FOLDERS, ["Папка", "Создавать всегда", "Транслитерация", "Дописывать артикул"],
-          FOLDER_ROWS, [42, 18, 16, 20])
+    sheet(S_FOLDERS, ["Папка", "Создавать всегда", "Транслитерация", "Дописывать артикул", "Префикс"],
+          FOLDER_ROWS, [42, 18, 16, 20, 20])
     sheet(S_RULES, ["Порядок", "Условие", "Расширения", "Папка", "Комментарий"], RULE_ROWS,
           [10, 60, 40, 38, 55])
     series, shared = series_from_structure_csv(structure_csv)
@@ -231,7 +235,7 @@ class Config:
     completeness: bool
     categories: dict = field(default_factory=dict)      # № -> имя папки
     new_articles: dict = field(default_factory=dict)    # norm(артикул) -> (артикул, №)
-    folders: list = field(default_factory=list)         # (путь, создавать, транслит, артикул)
+    folders: list = field(default_factory=list)         # (путь, создавать, транслит, артикул, префикс)
     rules: list = field(default_factory=list)
     series: dict = field(default_factory=dict)          # norm(серия) -> [артикулы/маски]
     shared: list = field(default_factory=list)          # (маска, серия, папка)
@@ -290,9 +294,9 @@ def load_config(book):
             raise ValueError(f"Лист «{S_NEW}»: категории {num} нет на листе «{S_CATS}»")
         cfg.new_articles[norm(art)] = (art, num)
     for r in rows_of(wb, S_FOLDERS):
-        cfg.folders.append((folder_key(r[0]), yes(r[1]), yes(r[2]), yes(r[3])))
+        cfg.folders.append((folder_key(r[0]), yes(r[1]), yes(r[2]), yes(r[3]), str(r[4]).strip()))
     if not any(f[0] == "" for f in cfg.folders):
-        cfg.folders.append(("", True, False, True))
+        cfg.folders.append(("", True, False, True, ""))
     for r in rows_of(wb, S_RULES):
         try:
             order = float(r[0])
@@ -375,11 +379,14 @@ def folder_flags(cfg, parent):
 
 
 def final_name(cfg, rel, article):
-    """Транслитерация и _<артикул> по флагам листа «Папки»."""
-    entry, _, translit, suffix = folder_flags(cfg, rel.parent)
+    """Префикс, транслитерация и _<артикул> по флагам листа «Папки»."""
+    entry, _, translit, suffix, prefix = folder_flags(cfg, rel.parent)
     entry_parts = len(Path(entry).parts) if entry else 0
     below = list(rel.parent.parts[entry_parts:]) if str(rel.parent) not in ("", ".") else []
     name = rel.name
+    prefix = prefix.replace("{артикул}", article)
+    if prefix and not norm(name).startswith(norm(prefix)):
+        name = prefix + name
     has_article = ps.article_pattern(article).search(norm(name)) is not None
     art = article
     if translit:
@@ -441,25 +448,27 @@ class Resolver:
         self.patterns[key] = ps.article_pattern(art)
 
     def from_path(self, rel):
-        """(артикул, путь внутри папки артикула) или (None, причина)."""
+        """(артикул, путь внутри папки артикула, []) или (None, причина, [артикулы для отчёта])."""
         for i, part in enumerate(rel[:-1]):
             if norm(part) in self.known:
-                return self.known[norm(part)], rel[i + 1:]
+                return self.known[norm(part)], rel[i + 1:], []
         for part in rel[:-1]:
             if ARTICLE_HINT_RE.fullmatch(part.strip()):
-                return None, f"папка «{part}»: такого артикула нет в фотобанке и на листе «{S_NEW}»"
+                return (None, f"папка «{part}»: такого артикула нет в фотобанке и на листе «{S_NEW}»",
+                        [part.strip()])
         name = norm(rel[-1])
         hits = [k for k, pat in self.patterns.items() if pat.search(name)]
         if not hits:
             hint = ARTICLE_HINT_RE.search(rel[-1])
             if hint:
                 return None, (f"артикул {hint.group(0)} не найден в фотобанке; "
-                              f"добавьте его на лист «{S_NEW}» с номером категории")
-            return None, "в имени файла нет артикула (положите файл в подпапку с именем артикула)"
+                              f"добавьте его на лист «{S_NEW}» с номером категории"), [hint.group(0)]
+            return None, "в имени файла нет артикула (положите файл в подпапку с именем артикула)", []
         best = max(hits, key=len)
         if any(h not in best for h in hits):
-            return None, "в имени несколько разных артикулов: " + ", ".join(self.known[h] for h in hits)
-        return self.known[best], rel
+            arts = [self.known[h] for h in hits]
+            return None, "в имени несколько разных артикулов: " + ", ".join(arts), arts
+        return self.known[best], rel, []
 
     def item_dir(self, article, dry, created):
         """Папка номенклатуры: существующая или новая (по листу «Новые артикулы»)."""
@@ -472,7 +481,7 @@ class Resolver:
         cat = self.bank.cats.get(num) or self.cfg.dest / self.cfg.categories[num]
         item = cat / art
         if not dry:
-            for f, create, _, _ in self.cfg.folders:
+            for f, create, *_ in self.cfg.folders:
                 if create:
                     os.makedirs(ps.long_path(item / f if f else item), exist_ok=True)
         self.bank.cats.setdefault(num, cat)
@@ -512,6 +521,7 @@ class Run:
     def __init__(self, cfg, dry):
         self.cfg, self.dry = cfg, dry
         self.journal, self.unsorted, self.created = [], [], []
+        self.unsorted_files = []   # файлы (в self.unsorted - строка на каждый артикул)
         self.written = {}   # norm(dst) -> исходный файл (защита от двух файлов в одно место)
         self.stamp = datetime.datetime.now()
 
@@ -552,9 +562,14 @@ class Run:
         log(f"  {action}: {dst.relative_to(self.cfg.dest).as_posix()}  (из {src_rel})")
         return True
 
-    def not_sorted(self, src_rel, reason, article=""):
-        self.unsorted.append({"Файл во «Входящих»": src_rel, "Артикул": article, "Причина": reason})
-        self.record(src_rel, article, None, "не разобран", reason)
+    def not_sorted(self, src_rel, reason, articles=()):
+        """Строка «Не разобрано» на каждый не найденный артикул (или одна, если артикула нет)."""
+        if isinstance(articles, str):
+            articles = [articles]
+        self.unsorted_files.append(src_rel)
+        for art in articles or [""]:
+            self.unsorted.append({"Файл во «Входящих»": src_rel, "Артикул": art, "Причина": reason})
+            self.record(src_rel, art, None, "не разобран", reason)
         log(f"  НЕ РАЗОБРАН: {src_rel} - {reason}")
 
 
@@ -599,15 +614,15 @@ def process_file(run, resolver, src, rel):
                 continue
             run.place(src, src_rel, art, item, final_name(cfg, Path(folder, rel[-1]), art))
         if missing:
-            shown = ", ".join(missing[:10]) + (f" и ещё {len(missing) - 10}" if len(missing) > 10 else "")
-            run.not_sorted(src_rel, f"общий документ серии {series}: нет папок артикулов {shown} "
-                                    f"(добавьте их на лист «{S_NEW}» или уберите из серии)", series)
+            run.not_sorted(src_rel, f"общий документ серии {series}: нет папки артикула; добавьте "
+                                    f"его на лист «{S_NEW}» или уберите из серии "
+                                    f"(не хватает папок: {len(missing)} из {len(articles)})", missing)
             return False
         return True
 
-    article, inner = resolver.from_path(rel)
+    article, inner, hints = resolver.from_path(rel)
     if article is None:
-        run.not_sorted(src_rel, inner)
+        run.not_sorted(src_rel, inner, hints)
         return False
     item, err = resolver.item_dir(article, run.dry, run.created)
     if err:
@@ -672,6 +687,8 @@ def write_report(cfg, run, bank, dry):
     counts = {}
     for j in run.journal:
         counts[j["Действие"]] = counts.get(j["Действие"], 0) + 1
+    if run.unsorted_files:
+        counts["не разобран"] = len(run.unsorted_files)   # файлов, а не строк по артикулам
     ws.append(["Параметр", "Значение"])
     for k, v in [("Запуск", run.stamp.strftime("%Y-%m-%d %H:%M:%S")),
                  ("Режим", ("пробный (--dry-run), ничего не изменено" if dry else
@@ -799,7 +816,7 @@ def main():
     done = sum(1 for j in run.journal if j["Действие"] in ("добавлен", "заменён"))
     log(f"Готово. Разложено файлов: {done}, уже было: "
         f"{sum(1 for j in run.journal if j['Действие'] == 'уже есть')}, "
-        f"не разобрано: {len(run.unsorted)}, новых номенклатур: {len(run.created)}")
+        f"не разобрано: {len(run.unsorted_files)}, новых номенклатур: {len(run.created)}")
     log(f"Отчёт: {report}")
     return 1 if errors else 0
 
